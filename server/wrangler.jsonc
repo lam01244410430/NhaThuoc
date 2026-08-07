@@ -1,0 +1,26 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "backend",
+	"main": "index.ts",
+	"compatibility_date": "2026-07-28",
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "NhaThuocDB",
+			"database_id": "577ec219-8918-469a-8d21-cdf3d9e5eda9",
+			"remote": false,
+			"migrations_dir": "drizzle"
+		}
+	]
+}

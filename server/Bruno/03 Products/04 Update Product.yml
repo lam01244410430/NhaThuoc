@@ -1,0 +1,30 @@
+info:
+  name: 04 Update Product
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/products/{{productId}}"
+  headers:
+    - name: Authorization
+      value: Bearer {{shopToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "price": 190000,
+        "sale_price": 160000,
+        "stock_quantity": 80,
+        "description": "Sản phẩm đã được cập nhật bằng Bruno",
+        "status": "active"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

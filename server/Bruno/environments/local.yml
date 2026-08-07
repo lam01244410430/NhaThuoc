@@ -1,0 +1,14 @@
+name: local
+variables:
+  - name: baseUrl
+    value: http://127.0.0.1:8787
+  - secret: true
+    name: customerToken
+  - secret: true
+    name: shopToken
+  - secret: true
+    name: adminToken
+  - name: shopId
+    value: ""
+  - name: productId
+    value: ""

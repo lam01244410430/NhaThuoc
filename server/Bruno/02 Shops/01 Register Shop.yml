@@ -1,0 +1,46 @@
+info:
+  name: 01 Register Shop
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/shops/register"
+  headers:
+    - name: Authorization
+      value: Bearer {{customerToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "shop_name": "Nhà thuốc Bruno Test 01",
+        "phone": "0911000001",
+        "description": "Nhà thuốc dùng để kiểm thử API local"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const body = res.getBody()
+
+        if (body?.data?.id) {
+          bru.setVar(
+            'shopId',
+            String(body.data.id)
+          )
+
+          console.log(
+            'shopId:',
+            bru.getVar('shopId')
+          )
+        }
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

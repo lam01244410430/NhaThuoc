@@ -1,0 +1,28 @@
+info:
+  name: 01 Register Customer
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/auth/register"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "username": "customer_test_01",
+        "name": "Nguyễn Văn Test",
+        "email": "customer.test01@gmail.com",
+        "phone": "0911000001",
+        "password": "Password@123"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

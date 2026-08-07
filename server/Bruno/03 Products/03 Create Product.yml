@@ -1,0 +1,58 @@
+info:
+  name: 03 Create Product
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/products"
+  headers:
+    - name: Authorization
+      value: Bearer {{shopToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "category_id": 1,
+        "name": "Vitamin C Bruno Test 02",
+        "slug": "vitamin-c-bruno-test-02",
+        "price": 180000,
+        "sale_price": 150000,
+        "description": "Sản phẩm dùng để kiểm thử API",
+        "usage_guide": "Sử dụng theo hướng dẫn của chuyên gia y tế",
+        "stock_quantity": 100,
+        "status": "active",
+        "thumbnail_url": "https://example.com/vitamin-c-test-02.jpg"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const body = res.getBody()
+
+        if (body?.data?.id) {
+          bru.setVar(
+            'productId',
+            String(body.data.id)
+          )
+
+          console.log(
+            'productId:',
+            bru.getVar('productId')
+          )
+        } else {
+          throw new Error(
+            'Response không có product ID'
+          )
+        }
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​

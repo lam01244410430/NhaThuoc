@@ -1,0 +1,13 @@
+@import "./animations.scss";
+@import "./fonts.scss";
+@import "./variables.scss";
+
+body,
+html {
+    height: 100vh !important;
+    overflow-x: hidden
+}
+
+// Then import Bootstrap an BootstrapVue SCSS files (order is important)
+@import 'node_modules/bootstrap/scss/bootstrap.scss';
+@import 'node_modules/bootstrap-vue/src/index.scss';

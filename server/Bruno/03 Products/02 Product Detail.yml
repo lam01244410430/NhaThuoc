@@ -1,0 +1,14 @@
+info:
+  name: 02 Product Detail
+  type: http
+
+http:
+  method: GET
+  url: "{{baseUrl}}/products/1"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

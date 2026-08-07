@@ -1,0 +1,42 @@
+info:
+  name: 02 Login Customer
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/auth/login"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "identity": "customer.test01@gmail.com",
+        "password": "Password@123"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const body = res.getBody()
+
+        if (!body?.data?.token) {
+          throw new Error('Response không có data.token')
+        }
+
+        bru.setVar('customerToken', body.data.token)
+
+        console.log(
+          'customerToken:',
+          bru.getVar('customerToken')
+        )
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

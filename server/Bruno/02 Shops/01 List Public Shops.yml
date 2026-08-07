@@ -1,0 +1,22 @@
+info:
+  name: 01 List Public Shops
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/shops?page=1&limit=12"
+  params:
+    - name: page
+      value: "1"
+      type: query
+    - name: limit
+      value: "12"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -1,0 +1,28 @@
+info:
+  name: 04 Update Shop Me
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/shops/me"
+  headers:
+    - name: Authorization
+      value: Bearer {{shopToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "shop_name": "Nhà thuốc Bruno Test 01 Updated",
+        "phone": "0911000001",
+        "description": "Hồ sơ shop đã được cập nhật bằng Bruno"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

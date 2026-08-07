@@ -1,0 +1,28 @@
+info:
+  name: 06 Approve Shop
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/shops/{{shopId}}/approval"
+  headers:
+    - name: Authorization
+      value: Bearer {{adminToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "approval_status": "approved",
+        "level": "verified"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​

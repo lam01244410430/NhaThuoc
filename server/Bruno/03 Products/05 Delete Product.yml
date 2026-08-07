@@ -1,0 +1,18 @@
+info:
+  name: 05 Delete Product
+  type: http
+  seq: 1
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/products/{{productId}}"
+  headers:
+    - name: Authorization
+      value: Bearer {{shopToken}}
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

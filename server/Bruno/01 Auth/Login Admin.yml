@@ -1,0 +1,51 @@
+info:
+  name: Login Admin
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/auth/login"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "identity": "admin@pharmacy.vn",
+        "password": "Password@123"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const body = res.getBody()
+
+        if (
+          body?.data?.token &&
+          body?.data?.user?.role === 'admin'
+        ) {
+          bru.setVar(
+            'adminToken',
+            body.data.token
+          )
+
+          console.log(
+            'adminToken:',
+            bru.getVar('adminToken')
+          )
+        } else {
+          throw new Error(
+            'Tài khoản đăng nhập không phải admin'
+          )
+        }
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​
