@@ -1,10 +1,11 @@
 info:
   name: 02 Product Detail
   type: http
+  seq: 2
 
 http:
   method: GET
-  url: "{{baseUrl}}/products/1"
+  url: "{{baseUrl}}/product/4"
   auth: inherit
 
 settings:

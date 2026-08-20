@@ -101,6 +101,40 @@ export const oauthAccounts = sqliteTable(
   ],
 );
 
+export const accountVerifications = sqliteTable(
+  "account_verifications",
+  {
+    verificationId: integer("verification_id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade", onUpdate: "cascade" }),
+    type: text("type", {
+      enum: ["change_phone", "change_email", "change_password"],
+    }).notNull(),
+    targetValue: text("target_value").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    usedAt: text("used_at"),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    check(
+      "ck_verification_type",
+      sql`${table.type} IN ('change_phone', 'change_email', 'change_password')`,
+    ),
+    check("ck_verification_target", sql`length(trim(${table.targetValue})) > 0`),
+    check("ck_verification_code_hash", sql`length(trim(${table.codeHash})) > 0`),
+    check("ck_verification_attempts", sql`${table.attempts} >= 0`),
+    index("idx_verification_user_type").on(
+      table.userId,
+      table.type,
+      table.createdAt,
+    ),
+    index("idx_verification_expiry").on(table.expiresAt),
+  ],
+);
+
 export const customerProfiles = sqliteTable(
   "customer_profiles",
   {
@@ -109,15 +143,21 @@ export const customerProfiles = sqliteTable(
       .references(() => users.userId, { onDelete: "cascade", onUpdate: "cascade" }),
     phone: text("phone"),
     dateOfBirth: text("date_of_birth"),
-    gender: text("gender", { enum: ["male", "female", "other"] }),
     createdAt: text("created_at").notNull().default(currentTimestamp),
     updatedAt: text("updated_at").notNull().default(currentTimestamp),
   },
   (table) => [
     unique("uq_customer_phone").on(table.phone),
     check(
-      "ck_customer_gender",
-      sql`${table.gender} IS NULL OR ${table.gender} IN ('male', 'female', 'other')`,
+      "ck_customer_phone",
+      sql`${table.phone} IS NULL OR (
+        length(${table.phone}) = 10
+        AND ${table.phone} GLOB '0[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      )`,
+    ),
+    check(
+      "ck_customer_date_of_birth",
+      sql`${table.dateOfBirth} IS NULL OR length(${table.dateOfBirth}) = 10`,
     ),
   ],
 );
@@ -221,48 +261,110 @@ export const addresses = sqliteTable(
   ],
 );
 
-export const categories = sqliteTable(
-  "categories",
-  {
-    categoryId: integer("category_id").primaryKey({ autoIncrement: true }),
-    categoryName: text("category_name").notNull(),
-    slug: text("slug").notNull(),
-    parentCategoryId: integer("parent_category_id"),
-    status: integer("status", { mode: "boolean" }).notNull().default(true),
-    createdAt: text("created_at").notNull().default(currentTimestamp),
-    updatedAt: text("updated_at").notNull().default(currentTimestamp),
-  },
-  (table) => [
-    uniqueIndex("uq_categories_slug_ci").on(sql`lower(${table.slug})`),
-    uniqueIndex("uq_categories_parent_name").on(
-      table.parentCategoryId,
-      table.categoryName
-    ),
-    foreignKey({
-      name: "fk_category_parent",
-      columns: [table.parentCategoryId],
-      foreignColumns: [table.categoryId],
-    })
-      .onDelete("restrict")
-      .onUpdate("cascade"),
-    check("ck_categories_name", sql`length(trim(${table.categoryName})) > 0`),
-    check("ck_categories_status", sql`${table.status} IN (0, 1)`),
-    check(
-      "ck_categories_no_self_parent",
-      sql`${table.parentCategoryId} IS NULL OR ${table.parentCategoryId} <> ${table.categoryId}`,
-    ),
-    check(
-      "ck_categories_slug",
-      sql`${table.slug} = lower(trim(${table.slug}))
-        AND length(${table.slug}) > 0
-        AND ${table.slug} NOT GLOB '*[^a-z0-9-]*'
-        AND ${table.slug} NOT LIKE '-%'
-        AND ${table.slug} NOT LIKE '%-'
-        AND ${table.slug} NOT LIKE '%--%'`,
-    ),
-    index("idx_categories_parent_status").on(table.parentCategoryId, table.status),
-  ],
-);
+export const categories =
+  sqliteTable(
+    'categories',
+    {
+      categoryId:
+        integer(
+          'category_id',
+        )
+          .primaryKey({
+            autoIncrement: true,
+          }),
+
+      categoryName:
+        text(
+          'category_name',
+        )
+          .notNull(),
+
+      slug:
+        text(
+          'slug',
+        )
+          .notNull(),
+
+      parentCategoryId:
+        integer(
+          'parent_category_id',
+        ),
+
+      status:
+        integer(
+          'status',
+          {
+            mode: 'boolean',
+          },
+        )
+          .notNull()
+          .default(true),
+
+      sortOrder:
+        integer(
+          'sort_order',
+        )
+          .notNull()
+          .default(100),
+
+      createdAt:
+        text(
+          'created_at',
+        )
+          .notNull()
+          .default(
+            currentTimestamp,
+          ),
+
+      updatedAt:
+        text(
+          'updated_at',
+        )
+          .notNull()
+          .default(
+            currentTimestamp,
+          ),
+    },
+    (table) => [
+      uniqueIndex(
+        'uq_categories_slug_ci',
+      ).on(
+        sql`lower(${table.slug})`,
+      ),
+
+      uniqueIndex(
+        'uq_categories_parent_name',
+      ).on(
+        table.parentCategoryId,
+        table.categoryName,
+      ),
+
+      foreignKey({
+        name:
+          'fk_category_parent',
+        columns: [
+          table.parentCategoryId,
+        ],
+        foreignColumns: [
+          table.categoryId,
+        ],
+      })
+        .onDelete(
+          'restrict',
+        )
+        .onUpdate(
+          'cascade',
+        ),
+
+      index(
+        'idx_categories_parent_status_sort',
+      ).on(
+        table.parentCategoryId,
+        table.status,
+        table.sortOrder,
+      ),
+    ],
+  );
 
 export const products = sqliteTable(
   "products",
@@ -280,7 +382,6 @@ export const products = sqliteTable(
     salePrice: integer("sale_price"),
     description: text("description"),
     usageGuide: text("usage_guide"),
-    stockQuantity: integer("stock_quantity").notNull().default(0),
     status: text("status", { enum: ["draft", "active", "inactive", "out_of_stock"] })
       .notNull()
       .default("draft"),
@@ -306,7 +407,6 @@ export const products = sqliteTable(
       "ck_products_sale_price",
       sql`${table.salePrice} IS NULL OR (${table.salePrice} >= 0 AND ${table.salePrice} <= ${table.price})`,
     ),
-    check("ck_products_stock", sql`${table.stockQuantity} >= 0`),
     check(
       "ck_products_status",
       sql`${table.status} IN ('draft', 'active', 'inactive', 'out_of_stock')`,
@@ -419,7 +519,6 @@ export const productVariants = sqliteTable(
       .references(() => products.productId, { onDelete: "cascade", onUpdate: "cascade" }),
     price: integer("price").notNull(),
     salePrice: integer("sale_price"),
-    stockQuantity: integer("stock_quantity").notNull().default(0),
     sku: text("sku").notNull(),
     status: text("status", { enum: ["active", "inactive", "out_of_stock"] })
       .notNull()
@@ -436,7 +535,6 @@ export const productVariants = sqliteTable(
       "ck_variants_sale_price",
       sql`${table.salePrice} IS NULL OR (${table.salePrice} >= 0 AND ${table.salePrice} <= ${table.price})`,
     ),
-    check("ck_variants_stock", sql`${table.stockQuantity} >= 0`),
     check(
       "ck_variants_status",
       sql`${table.status} IN ('active', 'inactive', 'out_of_stock')`,
@@ -461,6 +559,273 @@ export const variantValues = sqliteTable(
   (table) => [
     primaryKey({ name: "pk_variant_values", columns: [table.variantId, table.valueId] }),
     index("idx_variant_values_value").on(table.valueId),
+  ],
+);
+
+export const warehouses = sqliteTable(
+  "warehouses",
+  {
+    warehouseId: integer("warehouse_id").primaryKey({ autoIncrement: true }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    province: text("province").notNull(),
+    district: text("district"),
+    ward: text("ward"),
+    addressDetail: text("address_detail").notNull(),
+    phone: text("phone"),
+    status: text("status", { enum: ["active", "inactive"] })
+      .notNull()
+      .default("active"),
+    createdBy: integer("created_by").references(() => users.userId, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+    updatedAt: text("updated_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    uniqueIndex("uq_warehouse_code_ci").on(sql`lower(trim(${table.code}))`),
+    check("ck_warehouse_code", sql`length(trim(${table.code})) > 0`),
+    check("ck_warehouse_name", sql`length(trim(${table.name})) > 0`),
+    check("ck_warehouse_province", sql`length(trim(${table.province})) > 0`),
+    check("ck_warehouse_address", sql`length(trim(${table.addressDetail})) > 0`),
+    check("ck_warehouse_status", sql`${table.status} IN ('active', 'inactive')`),
+    index("idx_warehouses_status_location").on(
+      table.status,
+      table.province,
+      table.district,
+    ),
+    index("idx_warehouses_created_by").on(table.createdBy),
+  ],
+);
+
+export const inboundShipments = sqliteTable(
+  "inbound_shipments",
+  {
+    inboundId: integer("inbound_id").primaryKey({ autoIncrement: true }),
+    inboundCode: text("inbound_code").notNull(),
+    shopId: integer("shop_id")
+      .notNull()
+      .references(() => shopProfiles.shopId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.warehouseId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    status: text("status", {
+      enum: [
+        "draft",
+        "ready_to_ship",
+        "in_transit",
+        "partially_received",
+        "received",
+        "cancelled",
+      ],
+    })
+      .notNull()
+      .default("draft"),
+    trackingCode: text("tracking_code"),
+    note: text("note"),
+    shippedAt: text("shipped_at"),
+    receivedAt: text("received_at"),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+    updatedAt: text("updated_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    unique("uq_inbound_code").on(table.inboundCode),
+    check("ck_inbound_code", sql`length(trim(${table.inboundCode})) > 0`),
+    check(
+      "ck_inbound_status",
+      sql`${table.status} IN (
+        'draft', 'ready_to_ship', 'in_transit',
+        'partially_received', 'received', 'cancelled'
+      )`,
+    ),
+    check(
+      "ck_inbound_received_at",
+      sql`${table.status} <> 'received' OR ${table.receivedAt} IS NOT NULL`,
+    ),
+    index("idx_inbound_shop_status").on(table.shopId, table.status, table.createdAt),
+    index("idx_inbound_warehouse_status").on(
+      table.warehouseId,
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const inboundShipmentItems = sqliteTable(
+  "inbound_shipment_items",
+  {
+    inboundItemId: integer("inbound_item_id").primaryKey({ autoIncrement: true }),
+    inboundId: integer("inbound_id")
+      .notNull()
+      .references(() => inboundShipments.inboundId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.productId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    variantId: integer("variant_id"),
+    variantKey: integer("variant_key").generatedAlwaysAs(
+      sql`coalesce(variant_id, 0)`,
+      { mode: "stored" },
+    ),
+    expectedQuantity: integer("expected_quantity").notNull(),
+    receivedQuantity: integer("received_quantity").notNull().default(0),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    uniqueIndex("uq_inbound_item_product_variant").on(
+      table.inboundId,
+      table.productId,
+      table.variantKey,
+    ),
+    foreignKey({
+      name: "fk_inbound_item_product_variant",
+      columns: [table.productId, table.variantId],
+      foreignColumns: [productVariants.productId, productVariants.variantId],
+    })
+      .onDelete("restrict")
+      .onUpdate("cascade"),
+    check("ck_inbound_expected_quantity", sql`${table.expectedQuantity} > 0`),
+    check(
+      "ck_inbound_received_quantity",
+      sql`${table.receivedQuantity} >= 0 AND ${table.receivedQuantity} <= ${table.expectedQuantity}`,
+    ),
+    index("idx_inbound_items_inbound").on(table.inboundId),
+    index("idx_inbound_items_product_variant").on(table.productId, table.variantId),
+  ],
+);
+
+export const warehouseInventory = sqliteTable(
+  "warehouse_inventory",
+  {
+    inventoryId: integer("inventory_id").primaryKey({ autoIncrement: true }),
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.warehouseId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.productId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    variantId: integer("variant_id"),
+    variantKey: integer("variant_key").generatedAlwaysAs(
+      sql`coalesce(variant_id, 0)`,
+      { mode: "stored" },
+    ),
+    quantity: integer("quantity").notNull().default(0),
+    reservedQuantity: integer("reserved_quantity").notNull().default(0),
+    reorderPoint: integer("reorder_point").notNull().default(0),
+    updatedAt: text("updated_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    uniqueIndex("uq_inventory_warehouse_product_variant").on(
+      table.warehouseId,
+      table.productId,
+      table.variantKey,
+    ),
+    foreignKey({
+      name: "fk_inventory_product_variant",
+      columns: [table.productId, table.variantId],
+      foreignColumns: [productVariants.productId, productVariants.variantId],
+    })
+      .onDelete("restrict")
+      .onUpdate("cascade"),
+    check("ck_inventory_quantity", sql`${table.quantity} >= 0`),
+    check(
+      "ck_inventory_reserved_quantity",
+      sql`${table.reservedQuantity} >= 0 AND ${table.reservedQuantity} <= ${table.quantity}`,
+    ),
+    check("ck_inventory_reorder_point", sql`${table.reorderPoint} >= 0`),
+    index("idx_inventory_warehouse").on(table.warehouseId),
+    index("idx_inventory_product_variant").on(table.productId, table.variantId),
+  ],
+);
+
+export const inventoryMovements = sqliteTable(
+  "inventory_movements",
+  {
+    movementId: integer("movement_id").primaryKey({ autoIncrement: true }),
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.warehouseId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.productId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    variantId: integer("variant_id"),
+    movementType: text("movement_type", {
+      enum: [
+        "import",
+        "sale",
+        "return",
+        "adjustment",
+        "transfer_in",
+        "transfer_out",
+        "reserve",
+        "release",
+      ],
+    }).notNull(),
+    quantityDelta: integer("quantity_delta").notNull().default(0),
+    reservedDelta: integer("reserved_delta").notNull().default(0),
+    referenceType: text("reference_type"),
+    referenceId: integer("reference_id"),
+    note: text("note"),
+    createdBy: integer("created_by").references(() => users.userId, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    foreignKey({
+      name: "fk_movement_product_variant",
+      columns: [table.productId, table.variantId],
+      foreignColumns: [productVariants.productId, productVariants.variantId],
+    })
+      .onDelete("restrict")
+      .onUpdate("cascade"),
+    check(
+      "ck_movement_type",
+      sql`${table.movementType} IN (
+        'import', 'sale', 'return', 'adjustment',
+        'transfer_in', 'transfer_out', 'reserve', 'release'
+      )`,
+    ),
+    check(
+      "ck_movement_not_empty",
+      sql`${table.quantityDelta} <> 0 OR ${table.reservedDelta} <> 0`,
+    ),
+    check(
+      "ck_movement_reference",
+      sql`(
+        ${table.referenceType} IS NULL AND ${table.referenceId} IS NULL
+      ) OR (
+        ${table.referenceType} IS NOT NULL AND ${table.referenceId} IS NOT NULL
+      )`,
+    ),
+    index("idx_movements_warehouse_date").on(table.warehouseId, table.createdAt),
+    index("idx_movements_product_date").on(table.productId, table.createdAt),
+    index("idx_movements_reference").on(table.referenceType, table.referenceId),
   ],
 );
 
@@ -609,6 +974,7 @@ export const orderItems = sqliteTable(
       table.productId,
       table.variantKey,
     ),
+    unique("uq_order_item_shop").on(table.orderItemId, table.shopId),
     foreignKey({
       name: "fk_order_item_product_shop",
       columns: [table.productId, table.shopId],
@@ -630,6 +996,45 @@ export const orderItems = sqliteTable(
     index("idx_order_items_shop").on(table.shopId),
     index("idx_order_items_product_shop").on(table.productId, table.shopId),
     index("idx_order_items_product_variant").on(table.productId, table.variantId),
+  ],
+);
+
+export const orderFulfillments = sqliteTable(
+  "order_fulfillments",
+  {
+    fulfillmentId: integer("fulfillment_id").primaryKey({ autoIncrement: true }),
+    orderItemId: integer("order_item_id")
+      .notNull()
+      .references(() => orderItems.orderItemId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.warehouseId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    quantity: integer("quantity").notNull(),
+    status: text("status", {
+      enum: ["allocated", "picking", "packed", "shipped", "cancelled", "returned"],
+    })
+      .notNull()
+      .default("allocated"),
+    trackingCode: text("tracking_code"),
+    createdAt: text("created_at").notNull().default(currentTimestamp),
+    updatedAt: text("updated_at").notNull().default(currentTimestamp),
+  },
+  (table) => [
+    check("ck_fulfillment_quantity", sql`${table.quantity} > 0`),
+    check(
+      "ck_fulfillment_status",
+      sql`${table.status} IN (
+        'allocated', 'picking', 'packed', 'shipped', 'cancelled', 'returned'
+      )`,
+    ),
+    index("idx_fulfillments_order_item").on(table.orderItemId),
+    index("idx_fulfillments_warehouse_status").on(table.warehouseId, table.status),
   ],
 );
 
@@ -731,6 +1136,8 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type OAuthAccount = typeof oauthAccounts.$inferSelect;
 export type NewOAuthAccount = typeof oauthAccounts.$inferInsert;
+export type AccountVerification = typeof accountVerifications.$inferSelect;
+export type NewAccountVerification = typeof accountVerifications.$inferInsert;
 export type CustomerProfile = typeof customerProfiles.$inferSelect;
 export type NewCustomerProfile = typeof customerProfiles.$inferInsert;
 export type ShopProfile = typeof shopProfiles.$inferSelect;
@@ -753,12 +1160,24 @@ export type ProductVariant = typeof productVariants.$inferSelect;
 export type NewProductVariant = typeof productVariants.$inferInsert;
 export type VariantValue = typeof variantValues.$inferSelect;
 export type NewVariantValue = typeof variantValues.$inferInsert;
+export type Warehouse = typeof warehouses.$inferSelect;
+export type NewWarehouse = typeof warehouses.$inferInsert;
+export type InboundShipment = typeof inboundShipments.$inferSelect;
+export type NewInboundShipment = typeof inboundShipments.$inferInsert;
+export type InboundShipmentItem = typeof inboundShipmentItems.$inferSelect;
+export type NewInboundShipmentItem = typeof inboundShipmentItems.$inferInsert;
+export type WarehouseInventory = typeof warehouseInventory.$inferSelect;
+export type NewWarehouseInventory = typeof warehouseInventory.$inferInsert;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+export type NewInventoryMovement = typeof inventoryMovements.$inferInsert;
 export type CartItem = typeof cartItems.$inferSelect;
 export type NewCartItem = typeof cartItems.$inferInsert;
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
+export type OrderFulfillment = typeof orderFulfillments.$inferSelect;
+export type NewOrderFulfillment = typeof orderFulfillments.$inferInsert;
 export type Review = typeof reviews.$inferSelect;
 export type NewReview = typeof reviews.$inferInsert;
 export type ReturnRequest = typeof returns.$inferSelect;

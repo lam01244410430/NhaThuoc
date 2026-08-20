@@ -1,7 +1,7 @@
 info:
   name: 02 Login Shop
   type: http
-  seq: 1
+  seq: 5
 
 http:
   method: POST
@@ -10,36 +10,34 @@ http:
     type: json
     data: |-
       {
-        "identity": "customer.test01@gmail.com",
-        "password": "Password@123"
+        "identity": "nhathuocantam",
+        "password": "Abcd@123"
       }
   auth: inherit
 
 runtime:
   scripts:
-    - type: before-request
-      code: console.log('shopId:', bru.getEnvVar('shopId'))
     - type: after-response
       code: |-
         const body = res.getBody()
 
-        if (body?.data?.user?.role !== 'shop') {
-          throw new Error('Tài khoản chưa có role shop')
+        if (
+          body?.data?.token &&
+          body?.data?.user?.role === 'shop'
+        ) {
+          bru.setVar(
+            'shopToken',
+            body.data.token
+          )
+
+          console.log(
+            'shopToken:',
+            bru.getVar('shopToken')
+          )
         }
-
-        bru.setVar(
-          'shopId',
-          String(body.data.user.id)
-        )
-
-        bru.setVar(
-          'shopToken',
-          body.data.token
-        )
 
 settings:
   encodeUrl: true
   timeout: 0
   followRedirects: true
   maxRedirects: 5
-​

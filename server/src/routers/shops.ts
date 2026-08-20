@@ -1,6 +1,12 @@
 import { Hono } from 'hono'
-import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
+import {
+  createShopSchema,
+  shopIdParamSchema as idParamSchema,
+  updateShopApprovalSchema as updateApprovalSchema,
+  updateShopSchema,
+} from '../validators/shop.validator'
 import { verify } from 'hono/jwt'
 import { createMiddleware } from 'hono/factory'
 import type { Bindings } from '../types'
@@ -10,7 +16,7 @@ type ShopLevel = 'basic' | 'verified' | 'premium'
 type ShopApprovalStatus = 'pending' | 'approved' | 'rejected' | 'suspended'
 
 type AppEnv = {
-  Bindings: Bindings
+  Bindings: Bindings & { PRODUCT_MEDIA: R2Bucket }
   Variables: {
     jwtPayload: JwtPayload
   }
@@ -66,44 +72,34 @@ interface ExistingIdRecord {
 
 const shops = new Hono<AppEnv>()
 
-const createShopSchema = z.object({
-  shop_name: z
-    .string()
-    .trim()
-    .min(3, 'Tên shop phải có ít nhất 3 ký tự')
-    .max(150, 'Tên shop tối đa 150 ký tự'),
-
-  phone: z
-    .string()
-    .trim()
-    .min(8, 'Số điện thoại không hợp lệ')
-    .max(20, 'Số điện thoại không hợp lệ'),
-
-  description: z
-    .union([z.string().trim().max(2000), z.null()])
-    .optional()
+const dashboardQuerySchema = z.object({
+  days: z.coerce.number().int().min(7).max(30).default(7)
 })
 
-const updateShopSchema = createShopSchema.partial()
+const optionalDashboardFirst = async <T>(
+  label: string,
+  request: Promise<T | null>,
+  fallback: T
+): Promise<T> => {
+  try {
+    return (await request) ?? fallback
+  } catch (error: unknown) {
+    console.warn(`Seller Center optional metric unavailable: ${label}`, error)
+    return fallback
+  }
+}
 
-const updateApprovalSchema = z.object({
-  approval_status: z.enum([
-    'approved',
-    'rejected',
-    'suspended'
-  ]),
-
-  level: z
-    .enum(['basic', 'verified', 'premium'])
-    .optional()
-})
-
-const idParamSchema = z.object({
-  id: z.coerce
-    .number()
-    .int()
-    .positive('ID shop không hợp lệ')
-})
+const optionalDashboardAll = async <T>(
+  label: string,
+  request: Promise<D1Result<T>>
+): Promise<T[]> => {
+  try {
+    return (await request).results ?? []
+  } catch (error: unknown) {
+    console.warn(`Seller Center optional list unavailable: ${label}`, error)
+    return []
+  }
+}
 
 const getJwtSecret = (env: Bindings): string => {
   if (!env.JWT_SECRET) {
@@ -287,11 +283,6 @@ const getShopOwnership = async (
     .first<ShopOwnershipRecord>()
 }
 
-/* =========================================================
-   GET /api/shops
-   Danh sách shop đã được duyệt.
-========================================================= */
-
 shops.get('/', async (c) => {
   try {
     const pageValue = Number(
@@ -430,11 +421,6 @@ shops.get('/', async (c) => {
   }
 })
 
-/* =========================================================
-   GET /api/shops/me
-   Hồ sơ shop của tài khoản đang đăng nhập.
-========================================================= */
-
 shops.get('/me', authMiddleware, async (c) => {
   try {
     const payload = c.get('jwtPayload')
@@ -481,10 +467,400 @@ shops.get('/me', authMiddleware, async (c) => {
   }
 })
 
-/* =========================================================
-   GET /api/shops/:id
-   Chi tiết shop công khai.
-========================================================= */
+/* Seller Center: số liệu tổng hợp thật của cửa hàng. */
+shops.get(
+  '/me/dashboard',
+  authMiddleware,
+  zValidator('query', dashboardQuerySchema),
+  async (c) => {
+    try {
+      const payload = c.get('jwtPayload')
+      const shopId = Number(payload.sub)
+      const { days } = c.req.valid('query')
+
+      if (payload.role !== 'shop') {
+        return c.json(
+          { success: false, message: 'Tài khoản này không phải shop' },
+          403
+        )
+      }
+
+      const currentStart = `-${days - 1} days`
+      const previousStart = `-${days * 2 - 1} days`
+      const previousEnd = `-${days} days`
+
+      const [
+        salesSummary,
+        dailyResult,
+        taskSummary,
+        operationSummary,
+        returnSummary,
+        pendingReviewSummary,
+        reviewSummary,
+        pendingOrders,
+        lowStockProducts,
+        recentReviews
+      ] = await Promise.all([
+        c.env.DB.prepare(`
+          SELECT
+            COUNT(DISTINCT CASE WHEN DATE(o.order_date) >= DATE('now', ?)
+              THEN o.order_id END) AS current_orders,
+            COUNT(DISTINCT CASE WHEN DATE(o.order_date)
+              BETWEEN DATE('now', ?) AND DATE('now', ?)
+              THEN o.order_id END) AS previous_orders,
+            COALESCE(SUM(CASE
+              WHEN DATE(o.order_date) >= DATE('now', ?)
+                AND o.payment_status = 'paid'
+                AND o.order_status IN ('delivered', 'completed')
+              THEN oi.line_total ELSE 0 END), 0) AS current_revenue,
+            COALESCE(SUM(CASE
+              WHEN DATE(o.order_date) BETWEEN DATE('now', ?) AND DATE('now', ?)
+                AND o.payment_status = 'paid'
+                AND o.order_status IN ('delivered', 'completed')
+              THEN oi.line_total ELSE 0 END), 0) AS previous_revenue
+          FROM orders AS o
+          INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+          WHERE oi.shop_id = ?
+            AND DATE(o.order_date) >= DATE('now', ?)
+        `).bind(
+          currentStart,
+          previousStart,
+          previousEnd,
+          currentStart,
+          previousStart,
+          previousEnd,
+          shopId,
+          previousStart
+        ).first<Record<string, number>>(),
+
+        c.env.DB.prepare(`
+          SELECT
+            DATE(o.order_date) AS day,
+            COUNT(DISTINCT o.order_id) AS orders,
+            COALESCE(SUM(CASE
+              WHEN o.payment_status = 'paid'
+                AND o.order_status IN ('delivered', 'completed')
+              THEN oi.line_total ELSE 0 END), 0) AS revenue
+          FROM orders AS o
+          INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+          WHERE oi.shop_id = ?
+            AND DATE(o.order_date) >= DATE('now', ?)
+          GROUP BY DATE(o.order_date)
+          ORDER BY DATE(o.order_date)
+        `).bind(shopId, currentStart).all<Record<string, string | number>>(),
+
+        c.env.DB.prepare(`
+          SELECT
+            (SELECT COUNT(DISTINCT o.order_id)
+              FROM orders AS o INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+              WHERE oi.shop_id = ? AND o.order_status = 'pending') AS pending_orders,
+            (SELECT COUNT(DISTINCT o.order_id)
+              FROM orders AS o INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+              WHERE oi.shop_id = ?
+                AND o.order_status IN ('confirmed', 'processing')) AS processing_orders,
+            (SELECT COUNT(*) FROM products
+              WHERE shop_id = ? AND deleted_at IS NULL AND status = 'draft') AS draft_products,
+            (SELECT COUNT(*) FROM (
+              SELECT p.product_id
+              FROM products AS p
+              LEFT JOIN warehouse_inventory AS wi
+                ON wi.product_id = p.product_id
+                AND wi.shop_id = p.shop_id
+              WHERE p.shop_id = ? AND p.deleted_at IS NULL
+              GROUP BY p.product_id
+              HAVING COALESCE(SUM(wi.quantity - wi.reserved_quantity), 0) > 0
+                AND COALESCE(SUM(wi.quantity - wi.reserved_quantity), 0) <= 10
+            )) AS low_stock_products,
+            (SELECT COUNT(*) FROM (
+              SELECT p.product_id
+              FROM products AS p
+              LEFT JOIN warehouse_inventory AS wi
+                ON wi.product_id = p.product_id
+                AND wi.shop_id = p.shop_id
+              WHERE p.shop_id = ? AND p.deleted_at IS NULL
+              GROUP BY p.product_id
+              HAVING COALESCE(SUM(wi.quantity - wi.reserved_quantity), 0) <= 0
+            )) AS out_of_stock_products
+        `).bind(shopId, shopId, shopId, shopId, shopId)
+          .first<Record<string, number>>(),
+
+        c.env.DB.prepare(`
+          SELECT
+            COUNT(DISTINCT o.order_id) AS total_orders,
+            COUNT(DISTINCT CASE WHEN o.order_status = 'cancelled'
+              THEN o.order_id END) AS cancelled_orders,
+            COUNT(DISTINCT CASE WHEN o.order_status IN ('delivered', 'completed')
+              THEN o.order_id END) AS completed_orders,
+            COALESCE(SUM(CASE WHEN o.order_status IN ('delivered', 'completed')
+              THEN oi.quantity ELSE 0 END), 0) AS sold_quantity
+          FROM orders AS o
+          INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+          WHERE oi.shop_id = ?
+            AND DATE(o.order_date) >= DATE('now', '-27 days')
+        `).bind(shopId).first<Record<string, number>>(),
+
+        optionalDashboardFirst(
+          'returns',
+          c.env.DB.prepare(`
+          SELECT COALESCE(SUM(r.quantity), 0) AS returned_quantity
+          FROM returns AS r
+          INNER JOIN order_items AS oi ON oi.order_item_id = r.order_item_id
+          WHERE oi.shop_id = ?
+            AND DATE(r.requested_at) >= DATE('now', '-27 days')
+            AND r.status <> 'rejected'
+          `).bind(shopId).first<{ returned_quantity: number }>(),
+          { returned_quantity: 0 }
+        ),
+
+        optionalDashboardFirst(
+          'pending reviews',
+          c.env.DB.prepare(`
+            SELECT COUNT(*) AS pending_reviews
+            FROM reviews AS r
+            INNER JOIN products AS p ON p.product_id = r.product_id
+            WHERE p.shop_id = ? AND r.status = 'pending'
+          `).bind(shopId).first<{ pending_reviews: number }>(),
+          { pending_reviews: 0 }
+        ),
+
+        optionalDashboardFirst(
+          'review summary',
+          c.env.DB.prepare(`
+          SELECT COALESCE(AVG(r.rating), 0) AS average_rating,
+            COUNT(*) AS rating_count
+          FROM reviews AS r
+          INNER JOIN products AS p ON p.product_id = r.product_id
+          WHERE p.shop_id = ? AND r.status = 'published'
+          `).bind(shopId).first<Record<string, number>>(),
+          { average_rating: 0, rating_count: 0 }
+        ),
+
+        c.env.DB.prepare(`
+          SELECT DISTINCT o.order_id AS id, o.order_code, o.recipient_name,
+            o.order_status, o.order_date AS created_at
+          FROM orders AS o
+          INNER JOIN order_items AS oi ON oi.order_id = o.order_id
+          WHERE oi.shop_id = ?
+            AND o.order_status IN ('pending', 'confirmed', 'processing')
+          ORDER BY o.order_date DESC LIMIT 8
+        `).bind(shopId).all<Record<string, string | number>>(),
+
+        c.env.DB.prepare(`
+          SELECT p.product_id AS id, p.name,
+            COALESCE(SUM(wi.quantity - wi.reserved_quantity), 0) AS stock_quantity,
+            COALESCE(MAX(wi.updated_at), p.updated_at) AS created_at
+          FROM products AS p
+          LEFT JOIN warehouse_inventory AS wi
+            ON wi.product_id = p.product_id
+            AND wi.shop_id = p.shop_id
+          WHERE p.shop_id = ? AND p.deleted_at IS NULL
+          GROUP BY p.product_id, p.name, p.updated_at
+          HAVING COALESCE(SUM(wi.quantity - wi.reserved_quantity), 0) <= 10
+          ORDER BY stock_quantity ASC, created_at DESC LIMIT 8
+        `).bind(shopId).all<Record<string, string | number>>(),
+
+        optionalDashboardAll(
+          'recent reviews',
+          c.env.DB.prepare(`
+          SELECT r.review_id AS id, r.rating, r.title, r.comment,
+            r.status, r.created_at, p.name AS product_name
+          FROM reviews AS r
+          INNER JOIN products AS p ON p.product_id = r.product_id
+          WHERE p.shop_id = ?
+          ORDER BY r.created_at DESC LIMIT 10
+          `).bind(shopId).all<Record<string, string | number>>()
+        )
+      ])
+
+      const dailyMap = new Map(
+        (dailyResult.results ?? []).map((item) => [String(item.day), item])
+      )
+      const daily = Array.from({ length: days }, (_, index) => {
+        const date = new Date()
+        date.setUTCHours(0, 0, 0, 0)
+        date.setUTCDate(date.getUTCDate() - (days - 1 - index))
+        const day = date.toISOString().slice(0, 10)
+        const item = dailyMap.get(day)
+        return {
+          day,
+          revenue: Number(item?.revenue ?? 0),
+          orders: Number(item?.orders ?? 0)
+        }
+      })
+
+      const operations: Record<string, number> = operationSummary ?? {}
+      const totalOrders = Number(operations.total_orders ?? 0)
+      const soldQuantity = Number(operations.sold_quantity ?? 0)
+      const returnedQuantity = Number(returnSummary?.returned_quantity ?? 0)
+      const notifications = [
+        ...(pendingOrders.results ?? []).map((item) => ({
+          id: `order-${item.id}`,
+          type: 'order',
+          title: `Đơn hàng ${item.order_code}`,
+          description: `${item.recipient_name} · Cần tiếp tục xử lý`,
+          created_at: String(item.created_at),
+          section: 'orders'
+        })),
+        ...(lowStockProducts.results ?? []).map((item) => ({
+          id: `stock-${item.id}`,
+          type: 'inventory',
+          title: String(item.name),
+          description: Number(item.stock_quantity) === 0
+            ? 'Sản phẩm đã hết hàng'
+            : `Chỉ còn ${item.stock_quantity} sản phẩm`,
+          created_at: String(item.created_at),
+          section: 'inventory'
+        }))
+      ].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 12)
+
+      return c.json({
+        success: true,
+        data: {
+          period_days: days,
+          sales: {
+            current_revenue: Number(salesSummary?.current_revenue ?? 0),
+            previous_revenue: Number(salesSummary?.previous_revenue ?? 0),
+            current_orders: Number(salesSummary?.current_orders ?? 0),
+            previous_orders: Number(salesSummary?.previous_orders ?? 0),
+            daily
+          },
+          tasks: {
+            pending_orders: Number(taskSummary?.pending_orders ?? 0),
+            processing_orders: Number(taskSummary?.processing_orders ?? 0),
+            draft_products: Number(taskSummary?.draft_products ?? 0),
+            low_stock_products: Number(taskSummary?.low_stock_products ?? 0),
+            out_of_stock_products: Number(taskSummary?.out_of_stock_products ?? 0),
+            pending_reviews: Number(pendingReviewSummary?.pending_reviews ?? 0)
+          },
+          operations: {
+            cancellation_rate: totalOrders > 0
+              ? Number(operations.cancelled_orders ?? 0) / totalOrders * 100 : 0,
+            completion_rate: totalOrders > 0
+              ? Number(operations.completed_orders ?? 0) / totalOrders * 100 : 0,
+            return_rate: soldQuantity > 0
+              ? returnedQuantity / soldQuantity * 100 : 0,
+            average_rating: Number(reviewSummary?.average_rating ?? 0),
+            rating_count: Number(reviewSummary?.rating_count ?? 0)
+          },
+          notifications,
+          reviews: recentReviews
+        }
+      })
+    } catch (error: unknown) {
+      console.error('Get shop dashboard error:', error)
+      return c.json(
+        { success: false, message: 'Không thể tải số liệu Seller Center' },
+        500
+      )
+    }
+  }
+)
+
+
+/* Public storefront: chỉ sản phẩm active, xếp theo số lượng bán thực tế. */
+shops.get('/:id/products', async (c) => {
+  try {
+    const shopId = Number(c.req.param('id'))
+    const pageValue = Number(c.req.query('page') ?? '1')
+    const limitValue = Number(c.req.query('limit') ?? '24')
+    const page = Number.isInteger(pageValue) && pageValue > 0 ? pageValue : 1
+    const limit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 100) : 24
+    const offset = (page - 1) * limit
+
+    if (!Number.isInteger(shopId) || shopId <= 0) {
+      return c.json({ success: false, message: 'shop_id không hợp lệ' }, 400)
+    }
+
+    const approvedShop = await c.env.DB.prepare(`
+      SELECT sp.shop_id AS id
+      FROM shop_profiles AS sp
+      INNER JOIN users AS u ON u.user_id = sp.shop_id
+      WHERE sp.shop_id = ?
+        AND sp.approval_status = 'approved'
+        AND u.status = 'active'
+        AND u.deleted_at IS NULL
+      LIMIT 1
+    `).bind(shopId).first<ExistingIdRecord>()
+
+    if (!approvedShop) {
+      return c.json({ success: false, message: 'Không tìm thấy shop' }, 404)
+    }
+
+    const count = await c.env.DB.prepare(`
+      SELECT COUNT(*) AS total
+      FROM products AS p
+      INNER JOIN categories AS c ON c.category_id = p.category_id
+      WHERE p.shop_id = ?
+        AND p.deleted_at IS NULL
+        AND p.status = 'active'
+        AND c.status = 1
+    `).bind(shopId).first<CountRecord>()
+
+    const total = Number(count?.total ?? 0)
+    const result = await c.env.DB.prepare(`
+      SELECT
+        p.product_id AS id,
+        p.shop_id,
+        p.category_id,
+        p.name,
+        p.slug,
+        p.price,
+        p.sale_price,
+        p.description,
+        p.usage_guide,
+        COALESCE((
+          SELECT SUM(wi.quantity)
+          FROM warehouse_inventory AS wi
+          WHERE wi.product_id = p.product_id
+        ), 0) AS stock_quantity,
+        p.status,
+        sp.shop_name,
+        c.category_name,
+        COALESCE((
+          SELECT SUM(oi.quantity)
+          FROM order_items AS oi
+          INNER JOIN orders AS o ON o.order_id = oi.order_id
+          WHERE oi.product_id = p.product_id
+            AND oi.shop_id = p.shop_id
+            AND o.order_status IN ('delivered', 'completed')
+        ), 0) AS sold_quantity,
+        p.created_at,
+        p.updated_at,
+        (
+          SELECT m.url
+          FROM media AS m
+          WHERE m.product_id = p.product_id
+            AND m.type = 'image'
+          ORDER BY m.is_thumbnail DESC, m.priority ASC, m.media_id ASC
+          LIMIT 1
+        ) AS thumbnail
+      FROM products AS p
+      INNER JOIN shop_profiles AS sp ON sp.shop_id = p.shop_id
+      INNER JOIN categories AS c ON c.category_id = p.category_id
+      WHERE p.shop_id = ?
+        AND p.deleted_at IS NULL
+        AND p.status = 'active'
+        AND sp.approval_status = 'approved'
+        AND c.status = 1
+      ORDER BY sold_quantity DESC, p.product_id DESC
+      LIMIT ? OFFSET ?
+    `).bind(shopId, limit, offset).all<Record<string, unknown>>()
+
+    return c.json({
+      success: true,
+      data: result.results ?? [],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+      },
+    })
+  } catch (error: unknown) {
+    console.error('Get public shop products error:', error)
+    return c.json({ success: false, message: 'Không thể tải sản phẩm của shop' }, 500)
+  }
+})
 
 shops.get(
   '/:id',
@@ -527,11 +903,6 @@ shops.get(
     }
   }
 )
-
-/* =========================================================
-   POST /api/shops/register
-   Customer đăng ký trở thành shop.
-========================================================= */
 
 shops.post(
   '/register',
@@ -715,6 +1086,151 @@ shops.post(
     }
   }
 )
+
+
+shops.post(
+  '/me/avatar',
+  authMiddleware,
+  async (c) => {
+    try {
+      const payload = c.get('jwtPayload')
+      const shopId = Number(payload.sub)
+
+      if (payload.role !== 'shop') {
+        return c.json({ success: false, message: 'Tài khoản này không phải shop' }, 403)
+      }
+
+      const existing = await getShopOwnership(c.env.DB, shopId)
+      if (!existing) {
+        return c.json({ success: false, message: 'Không tìm thấy hồ sơ shop' }, 404)
+      }
+
+      const formData = await c.req.raw.formData()
+      const uploadedFile = formData.get('file')
+
+      if (
+        !uploadedFile ||
+        typeof uploadedFile === 'string' ||
+        typeof uploadedFile.stream !== 'function'
+      ) {
+        return c.json({ success: false, message: 'Vui lòng chọn ảnh đại diện hợp lệ' }, 400)
+      }
+
+      const file = uploadedFile
+
+      const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+      if (!allowedTypes.has(file.type)) {
+        return c.json({ success: false, message: 'Avatar chỉ hỗ trợ JPG, PNG hoặc WebP' }, 400)
+      }
+      if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+        return c.json({ success: false, message: 'Avatar phải có dung lượng tối đa 5MB' }, 400)
+      }
+
+      const extensionByType: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+      }
+      const filename = `${crypto.randomUUID()}.${extensionByType[file.type]}`
+      const key = `shop/avatar/${shopId}/${filename}`
+      const avatar = `/shop/avatar/${shopId}/${filename}`
+
+      const currentUser = await c.env.DB.prepare(`
+        SELECT avatar FROM users WHERE user_id = ? LIMIT 1
+      `).bind(shopId).first<{ avatar: string | null }>()
+
+      const originalName =
+        typeof file.name === 'string' && file.name.trim()
+          ? file.name.trim().slice(0, 180)
+          : `shop-avatar.${extensionByType[file.type]}`
+
+      const fileBuffer = await file.arrayBuffer()
+
+      await c.env.PRODUCT_MEDIA.put(key, fileBuffer, {
+        httpMetadata: {
+          contentType: file.type,
+          cacheControl: 'public, max-age=31536000, immutable',
+        },
+        customMetadata: {
+          shopId: String(shopId),
+          purpose: 'shop-avatar',
+          originalName,
+        },
+      })
+
+      await c.env.DB.prepare(`
+        UPDATE users
+        SET avatar = ?, updated_at = DATETIME('now')
+        WHERE user_id = ?
+      `).bind(avatar, shopId).run()
+
+      const oldAvatar = currentUser?.avatar
+      let oldKey: string | null = null
+
+      if (oldAvatar?.startsWith('/shop/avatar/')) {
+        const oldPath = oldAvatar.slice('/shop/avatar/'.length)
+        const [oldShopId, oldFilename] = oldPath.split('/')
+        if (oldShopId && oldFilename) {
+          oldKey = `shop/avatar/${oldShopId}/${oldFilename}`
+        }
+      } else if (oldAvatar?.startsWith(`shop/avatar/${shopId}/`)) {
+        oldKey = oldAvatar
+      } else if (oldAvatar?.startsWith(`shops/avatars/${shopId}/`)) {
+        oldKey = oldAvatar
+      }
+
+      if (oldKey && oldKey !== key) {
+        await c.env.PRODUCT_MEDIA.delete(oldKey)
+      }
+
+      return c.json({ success: true, data: { key, url: avatar, avatar } }, 201)
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error)
+      console.error('Upload shop avatar error:', error)
+      return c.json(
+        {
+          success: false,
+          message: 'Không thể cập nhật ảnh đại diện cửa hàng',
+          detail,
+        },
+        500,
+      )
+    }
+  },
+)
+
+shops.get('/avatar/:shopId/:filename', async (c) => {
+  try {
+    const shopId = c.req.param('shopId')
+    const filename = c.req.param('filename')
+
+    if (!/^\d+$/.test(shopId) || !/^[a-zA-Z0-9._-]+$/.test(filename)) {
+      return c.json({ success: false, message: 'Đường dẫn avatar không hợp lệ' }, 400)
+    }
+
+    const key = `shop/avatar/${shopId}/${filename}`
+    let object = await c.env.PRODUCT_MEDIA.get(key)
+
+    if (!object) {
+      const legacyKey = `shops/avatars/${shopId}/${filename}`
+      object = await c.env.PRODUCT_MEDIA.get(legacyKey)
+    }
+
+    if (!object) {
+      return c.json({ success: false, message: 'Không tìm thấy avatar' }, 404)
+    }
+
+    const headers = new Headers()
+    object.writeHttpMetadata(headers)
+    headers.set('etag', object.httpEtag)
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+
+    return new Response(object.body, { headers })
+  } catch (error) {
+    console.error('Get shop avatar error:', error)
+    return c.json({ success: false, message: 'Không thể tải avatar' }, 500)
+  }
+})
 
 shops.put(
   '/me',

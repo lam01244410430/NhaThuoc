@@ -1,0 +1,27 @@
+info:
+  name: 01 Request phone OTP
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/user/me/otp"
+  headers:
+    - name: Authorization
+      value: Bearer {{customerToken}}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "type": "change_phone",
+        "target_value": "0901213123"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

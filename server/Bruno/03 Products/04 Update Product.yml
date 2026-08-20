@@ -1,11 +1,11 @@
 info:
   name: 04 Update Product
   type: http
-  seq: 1
+  seq: 3
 
 http:
   method: PUT
-  url: "{{baseUrl}}/products/{{productId}}"
+  url: "{{baseUrl}}/product/{{productId}}"
   headers:
     - name: Authorization
       value: Bearer {{shopToken}}

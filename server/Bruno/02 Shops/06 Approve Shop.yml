@@ -1,10 +1,10 @@
 info:
   name: 06 Approve Shop
   type: http
-  seq: 1
+  seq: 5
 
 http:
-  method: PUT
+  method: PATCH
   url: "{{baseUrl}}/shops/{{shopId}}/approval"
   headers:
     - name: Authorization
@@ -25,4 +25,3 @@ settings:
   timeout: 0
   followRedirects: true
   maxRedirects: 5
-​

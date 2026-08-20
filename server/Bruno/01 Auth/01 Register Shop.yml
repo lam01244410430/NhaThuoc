@@ -15,8 +15,8 @@ http:
     type: json
     data: |-
       {
-        "shop_name": "Nhà thuốc Bruno Test 01",
-        "phone": "0911000001",
+        "shop_name": "Shop test 01",
+        "phone": "0000000001",
         "description": "Nhà thuốc dùng để kiểm thử API local"
       }
   auth: inherit

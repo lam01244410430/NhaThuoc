@@ -2,16 +2,12 @@ import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { sign, verify } from 'hono/jwt'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
-import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import type { D1Database } from '@cloudflare/workers-types'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq, isNull, or, sql } from 'drizzle-orm'
-import {
-  users,
-  customerProfiles,
-  oauthAccounts
-} from '../db/schema'
+import { users, customerProfiles, oauthAccounts } from '../db/schema'
+import { loginSchema, oauthCallbackSchema, registerSchema } from '../validators/auth.validator'
 
 type UserRole = 'customer' | 'admin' | 'shop'
 type UserStatus = 'pending' | 'active' | 'blocked' | 'deleted'
@@ -74,59 +70,6 @@ interface JwtPayLoad {
 }
 
 const auth = new Hono<Env>()
-
-const registerSchema = z.object({
-  username: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(4, 'Username phải có ít nhất 4 ký tự')
-    .max(50, 'Username tối đa 50 ký tự')
-    .regex(/^[a-z0-9_]+$/, 'Username chỉ gồm chữ thường, số và dấu gạch dưới'),
-
-  name: z
-    .string()
-    .trim()
-    .min(3, 'Tên phải có ít nhất 3 ký tự')
-    .max(100, 'Tên tối đa 100 ký tự'),
-
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .email('Định dạng email không hợp lệ'),
-
-  phone: z
-    .string()
-    .trim()
-    .regex(/^\d{10}$/, 'Số điện thoại phải gồm đúng 10 chữ số')
-    .optional(),
-
-  password: z
-    .string()
-    .min(8, 'Mật khẩu phải có ít nhất 8 ký tự')
-    .regex(
-      /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>_+\-=[\]\\\/ ]).+$/,
-      'Mật khẩu phải có chữ hoa, số và ký tự đặc biệt'
-    )
-})
-
-const loginSchema = z.object({
-  identity: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(1, 'Vui lòng nhập email hoặc username'),
-
-  password: z
-    .string()
-    .min(1, 'Vui lòng nhập mật khẩu')
-})
-
-const oauthCallbackSchema = z.object({
-  code: z.string().min(1, 'Thiếu mã OAuth'),
-  state: z.string().min(1, 'Thiếu OAuth state')
-})
 
 const getJwtSecret = (env: Env['Bindings']): string => {
   if (!env.JWT_SECRET) {
@@ -876,9 +819,7 @@ auth.get(
         ? error.message
         : 'Đăng nhập Facebook thất bại'
 
-      return c.redirect(
-        `${c.env.FRONTEND_URL}/login?oauthError=${encodeURIComponent(message)}`
-      )
+      return c.redirect(`${c.env.FRONTEND_URL}/login?oauthError=${encodeURIComponent(message)}`)
     }
   }
 )

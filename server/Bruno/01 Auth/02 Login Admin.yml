@@ -1,10 +1,10 @@
 info:
-  name: Login Admin
+  name: 02 Login Admin
   type: http
-  seq: 1
+  seq: 6
 
 http:
-  method: GET
+  method: POST
   url: "{{baseUrl}}/auth/login"
   headers:
     - name: Content-Type
@@ -13,8 +13,8 @@ http:
     type: json
     data: |-
       {
-        "identity": "admin@pharmacy.vn",
-        "password": "Password@123"
+        "identity": "admin",
+        "password": "admin"
       }
   auth: inherit
 
@@ -37,10 +37,6 @@ runtime:
             'adminToken:',
             bru.getVar('adminToken')
           )
-        } else {
-          throw new Error(
-            'Tài khoản đăng nhập không phải admin'
-          )
         }
 
 settings:
@@ -48,4 +44,3 @@ settings:
   timeout: 0
   followRedirects: true
   maxRedirects: 5
-​

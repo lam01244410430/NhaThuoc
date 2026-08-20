@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/products?page=1&limit=12"
+  url: "{{baseUrl}}/product?page=1&limit=12"
   params:
     - name: page
       value: "1"

@@ -1,7 +1,7 @@
 info:
   name: 02 Login Customer
   type: http
-  seq: 1
+  seq: 2
 
 http:
   method: POST
@@ -13,8 +13,8 @@ http:
     type: json
     data: |-
       {
-        "identity": "customer.test01@gmail.com",
-        "password": "Password@123"
+        "identity": "lam01244410430",
+        "password": "L@m07082003"
       }
   auth: inherit
 
@@ -23,17 +23,21 @@ runtime:
     - type: after-response
       code: |-
         const body = res.getBody()
+        const token = body?.data?.token
 
-        if (!body?.data?.token) {
-          throw new Error('Response không có data.token')
+        if (!body?.success || !token) {
+          throw new Error('Response đăng nhập không có token')
         }
 
-        bru.setVar('customerToken', body.data.token)
-
-        console.log(
-          'customerToken:',
-          bru.getVar('customerToken')
+        bru.setEnvVar(
+          'customerToken',
+          String(token),
+          { persist: true }
         )
+
+        console.log('Đã persist customerToken:', Boolean(
+          bru.getEnvVar('customerToken')
+        ))
 
 settings:
   encodeUrl: true

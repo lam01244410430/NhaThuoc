@@ -144,15 +144,13 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  ApiError,
-  authService,
-  type RegisterPayload,
-} from '@/services/auth.service'
+import axios from 'axios'
+import { useAuthStore } from '@/stores/auth'
+
+type RegisterField = 'username' | 'name' | 'email' | 'phone' | 'password' | 'confirmPassword'
 
 const router = useRouter()
-
-type RegisterField = keyof RegisterPayload | 'confirmPassword'
+const authStore = useAuthStore()
 
 const form = reactive({
   username: '',
@@ -176,7 +174,7 @@ const isLoading = ref(false)
 const showError = ref(false)
 const globalErrorMessage = ref('')
 
-const clearError = (field: RegisterField): void => {
+const clearError = (field: RegisterField) => {
   errors[field] = ''
   showError.value = false
 }
@@ -200,6 +198,8 @@ const validateForm = (): boolean => {
     errors.username = 'Username phải có từ 4 đến 50 ký tự'
   } else if (!/^[a-z0-9_]+$/.test(username)) {
     errors.username = 'Username chỉ gồm chữ thường, chữ số và dấu gạch dưới'
+  } else if (/\s/.test(username)) {
+    errors.username = 'Username không được chưa dấu cách'
   }
 
   if (name.length < 2 || name.length > 100) {
@@ -235,32 +235,17 @@ const validateForm = (): boolean => {
   return !Object.values(errors).some(Boolean)
 }
 
-const applyBackendErrors = (error: ApiError): void => {
-  const fields: Array<keyof RegisterPayload> = [
-    'username',
-    'name',
-    'email',
-    'phone',
-    'password',
-  ]
-
-  fields.forEach((field) => {
-    const message = error.fieldErrors[field]?.[0]
-    if (message) errors[field] = message
-  })
-}
-
 const onSubmit = async (): Promise<void> => {
   if (!validateForm()) return
-
   isLoading.value = true
   showError.value = false
+  globalErrorMessage.value = ''
 
   try {
-    await authService.register({
-      username: form.username,
-      name: form.name,
-      email: form.email,
+    await authStore.register({
+      username: form.username.trim().toLowerCase(),
+      name: form.name.trim(),
+      email: form.email.trim().toLowerCase(),
       phone: normalizePhone(form.phone) || undefined,
       password: form.password,
     })
@@ -273,13 +258,22 @@ const onSubmit = async (): Promise<void> => {
       },
     })
   } catch (error: unknown) {
-    if (error instanceof ApiError) {
-      applyBackendErrors(error)
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data
+      const backendErrors = data?.error
+      if (backendErrors) {
+        errors.username = backendErrors.username?.[0] || ''
+        errors.name = backendErrors.name?.[0] || ''
+        errors.email = backendErrors.email?.[0] || ''
+        errors.phone = backendErrors.phone?.[0] || ''
+        errors.password = backendErrors.password?.[0] || ''
+      }
+      globalErrorMessage.value = data?.message || 'Đăng ký thất bại'
+    } else if (error instanceof Error) {
       globalErrorMessage.value = error.message
     } else {
       globalErrorMessage.value = 'Không thể kết nối đến máy chủ'
     }
-
     showError.value = true
   } finally {
     isLoading.value = false

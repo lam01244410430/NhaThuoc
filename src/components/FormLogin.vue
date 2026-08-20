@@ -5,6 +5,7 @@
         <h1 class="text-center mb-3">Login</h1>
         <h2 class="text-center mb-4">Welcome back!</h2>
 
+        <!-- OAuth -->
         <div class="d-flex justify-content-center mb-4">
           <button
             type="button"
@@ -141,28 +142,40 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import axios from 'axios'
+
 import googleIcon from '@/assets/images/google.png'
 import facebookIcon from '@/assets/images/facebook.png'
-import {
-  ApiError,
-  authService,
-  type LoginPayload,
-} from '@/services/auth.service'
-import { saveAuthSession } from '@/utils/auth-storage'
+
+
+import { API_BASE_URL } from '@/services/auth.service'
+import { useAuthStore } from '@/stores/auth'
+
+type LoginForm = {
+  identity: string
+  password: string
+  remember: boolean
+}
+
+type LoginErrors = {
+  identity: string
+  password:  string
+}
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const queryIdentity =
   typeof route.query.identity === 'string' ? route.query.identity : ''
 
-const form = reactive({
+const form = reactive<LoginForm>({
   identity: queryIdentity,
   password: '',
   remember: false,
 })
 
-const errors = reactive<Record<keyof LoginPayload, string>>({
+const errors = reactive<LoginErrors>({
   identity: '',
   password: '',
 })
@@ -179,7 +192,7 @@ if (typeof route.query.oauthError === 'string') {
   showError.value = true
 }
 
-const clearError = (field: keyof LoginPayload): void => {
+const clearError = (field: keyof LoginErrors): void => {
   errors[field] = ''
   showError.value = false
 }
@@ -199,45 +212,41 @@ const validateForm = (): boolean => {
   return !errors.identity && !errors.password
 }
 
-const applyBackendErrors = (error: ApiError): void => {
-  const identityError = error.fieldErrors.identity?.[0]
-  const passwordError = error.fieldErrors.password?.[0]
-
-  if (identityError) errors.identity = identityError
-  if (passwordError) errors.password = passwordError
-}
-
 const onSubmit = async (): Promise<void> => {
   if (!validateForm()) return
 
   isLoading.value = true
   showError.value = false
+  globalErrorMessage.value = ''
   successMessage.value = ''
 
   try {
-    const data = await authService.login({
-      identity: form.identity,
-      password: form.password,
-    })
-
-    saveAuthSession(data, form.remember)
+      await authStore.login(
+        form.identity.trim(),
+        form.password,
+        form.remember,
+    )
     await router.replace('/')
   } catch (error: unknown) {
-    if (error instanceof ApiError) {
-      applyBackendErrors(error)
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data
+
+      errors.identity = data?.errors?.identity?.[0] || ''
+      errors.password = data?.errors?.password?.[0] || ''
+      globalErrorMessage.value = data.message || 'Đăng nhập thất bại'
+    } else if (error instanceof Error) {
       globalErrorMessage.value = error.message
     } else {
-      globalErrorMessage.value = 'Không thể kết nối đến máy chủ'
+      globalErrorMessage.value = 'Đăng nhập thất bại'
     }
 
-    showError.value = true
+    showError.value = true  
   } finally {
     isLoading.value = false
   }
 }
-
 const loginWithOAuth = (provider: 'google' | 'facebook'): void => {
-  window.location.assign(authService.oauthUrl(provider))
+  window.location.assign(`${API_BASE_URL}/auth/${provider}`)
 }
 </script>
 
@@ -275,6 +284,7 @@ const loginWithOAuth = (provider: 'google' | 'facebook'): void => {
 
       &:disabled {
         opacity: 0.6;
+        cursor: not-allowed;
       }
     }
 
@@ -292,7 +302,8 @@ const loginWithOAuth = (provider: 'google' | 'facebook'): void => {
 
       &:focus {
         border-color: #00823d;
-        box-shadow: 0 0 0 0.25rem rgba(0, 130, 61, 0.25);
+        box-shadow:
+          0 0 0 0.25rem rgba(0, 130, 61, 0.25);
       }
     }
 
@@ -315,13 +326,19 @@ const loginWithOAuth = (provider: 'google' | 'facebook'): void => {
     display: inline-flex;
     justify-content: center;
     align-items: center;
+
     width: 90px;
     height: 50px;
+
     border-radius: 15px;
     background: #00823d;
     color: #fff;
+
     font-size: 22px;
-    box-shadow: -4px 4px 4px rgba(0, 0, 0, 0.15);
+
+    box-shadow:
+      -4px 4px 4px rgba(0, 0, 0, 0.15);
+
     cursor: pointer;
 
     &:hover:not(:disabled) {
@@ -345,7 +362,6 @@ const loginWithOAuth = (provider: 'google' | 'facebook'): void => {
       color: #00823d;
       text-decoration: none;
       font-weight: 600;
-      cursor: pointer;
 
       &:hover {
         text-decoration: underline;

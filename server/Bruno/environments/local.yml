@@ -2,13 +2,21 @@ name: local
 variables:
   - name: baseUrl
     value: http://127.0.0.1:8787
+  - name: shopId
+    value: ""
+  - name: productId
+    value: ""
+  - name: shopToken
+    value: ""
+  - name: customerToken
+    value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3Iiwicm9sZSI6ImN1c3RvbWVyIiwiZW1haWwiOiJsYW12aXBib3k3NzdAZ21haWwuY29tIiwibmFtZSI6IkzDom0iLCJpYXQiOjE3ODcwNDY1MjUsImV4cCI6MTc4NzY1MTMyNX0.XnKK3M4W_jCK1m6VxYkSlgL5BB6rXD-2TWQ2qp0fBUw
+  - name: adminToken
+    value: ""
+  - name: categoryId
+    value: ""
   - secret: true
     name: customerToken
   - secret: true
     name: shopToken
   - secret: true
     name: adminToken
-  - name: shopId
-    value: ""
-  - name: productId
-    value: ""

@@ -27,13 +27,16 @@
         <div class="menu-left">
           <ul class="list-unstyled mb-0">
             <li
-              v-for="(item,index) in categories"
-              :key="index"
+              v-for="(item, index) in categories"
+              :key="item.id"
               class="category-item"
-              :class="{ active: activeIndex === index }"
-              @mouseenter="activeIndex=index"
+              :class="{active: activeIndex === index}
+              "@mouseenter="activeIndex = index"
             >
-              <span>{{ item.name }}</span>
+              <span>
+                {{ item.name }}
+              </span>
+
               <font-awesome-icon
                 icon="chevron-right"
                 class="arrow"
@@ -48,15 +51,26 @@
             mode="out-in"
           >
             <div
-              :key="activeCategory.name"
+              v-if="activeCategory.id !== 0"
+              :key="activeCategory.id"
               class="submenu-content"
             >
-              <h5> {{ activeCategory.name }} </h5>
+              <h5>
+                {{ activeCategory.name }}
+              </h5>
+
               <div class="submenu-grid">
                 <router-link
-                  v-for="(sub,index) in activeCategory.subCategories"
-                  :key="index"
-                  :to="sub.link || '/'"
+                  :to="activeCategory.link"
+                  class="submenu-item"
+                >
+                  Xem tất cả
+                </router-link>
+
+                <router-link
+                  v-for="sub in activeCategory.subCategories"
+                  :key="sub.id"
+                  :to="sub.link"
                   class="submenu-item"
                 >
                   {{ sub.name }}
@@ -71,85 +85,92 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import apiClient from '@/services/api'
 
 interface SubCategory {
+  id: number
   name: string
-  link?: string
+  slug: string
+  link: string
+  subCategories?: SubCategory[]
 }
 
 interface Category {
+  id: number
   name: string
+  slug: string
+  link: string
   subCategories: SubCategory[]
 }
 
-const defaultCategory: Category = {
-  name: '',
-  subCategories: []
+interface CategoryTreeResponse {
+  success: boolean
+  data: Category[]
 }
 
 const showMenu = ref(false)
-const activeIndex = ref(0)
-const categories = ref<Category[]>([
-  {
-    name: 'Ưu đãi',
-    subCategories: [
-      { name: 'Mỹ phẩm giá sốc', link: '/Category/my-pham-gia-soc'},
-      { name: 'Buy 1 Get 1 Free', link: '/Category/offers/buy-1-get-1-free'},
-      { name: 'Seasonal Offers', link: '/Category/offers/seasonal-offers'}
-    ]
-  },
-  {
-    name: 'Thuốc',
-    subCategories: [
-      { name: 'Xem tất cả', link: '/Category/thuoc'},
-      { name: 'Mắt, tai mũi họng', link: '/Category/mat-tai-mui-hong'},
-      { name: 'Tiêu hoá, gan mật', link: '/Category/tieu-hoa-gan-mat'},
-      { name: 'Tim mạch', link: '/Category/tim-mach'},
-      { name: 'Kháng sinh', link: '/Category/khang-sinh'},
-      { name: 'Cơ xương khớp, gút', link: '/Category/co-xuong-khop-gut'},
-      { name: 'Da liễu, dị ứng', link: '/Category/da-lieu-di-ung'},
-      { name: 'Giảm đau, hạ sốt, kháng viêm', link: '/Category/giam-dau-ha-sot-khang-viem'}
-    ]
-  },
-{
-    name: 'Thực phẩm chức năng',
-    subCategories: [
-      { name: 'Xem tất cả', link: '/Category/thuc-pham-chuc-nang'},
-      { name: 'Bổ gan, thanh nhiệt', link: '/Category/bo-gan-thanh-nhiet'},
-      { name: 'Bổ não', link: '/Category/bo-nao'},
-      { name: 'Bổ phế, hô hấp', link: '/Category/bo-phe-ho-hap'},
-      { name: 'Bổ trợ xương khớp', link: '/Category/bo-tro-xuong-khop'},
-      { name: 'Hỗ trợ tiêu hoá', link: '/Category/ho-tro-tieu-hoa'},
-      { name: 'Làm đẹp, giảm cân', link: '/Category/lam-dep-giam-can'}
-    ]
-  },
-  {
-    name: 'Dược mỹ phẩm',
-    subCategories: [
-      { name: 'Xem tất cả', link: '/Category/duoc-my-pham'},
-      { name: 'Dưỡng da, dưỡng môi', link: '/Category/duong-da-duong-moi'},
-      { name: 'Kem, sữa rửa mặt', link: '/Category/kem-sua-rua-mat'},
-      { name: 'Trị mụn, ngừa sẹo, mờ thâm', link: '/Category/tri-mun-ngua-seo-mo-tham'},
-      { name: 'Tẩy trang', link: '/Category/tay-trang'},
-      { name: 'Tẩy tế bào chết', link: '/Category/tay-te-bao-chet'},
-      { name: 'Toner và xịt khoáng', link: '/Category/toner-va-xit-khoang'}
-    ]
-  },
-  {
-    name: 'Thực phẩm dinh dưỡng',
-    subCategories: [
-      { name: 'Xem tất cả', link: '/Category/thuc-pham-dinh-duong'},
-      { name: 'Mật ong', link: '/Category/mat-ong'},
-      { name: 'Nghệ', link: '/Category/nghe'},
-      { name: 'Đường ăn kiêng', link: '/Category/duong-an-kieng'}
-    ]
-  }
-])
 
-const activeCategory = computed<Category>(() => {
-  return categories.value[activeIndex.value] ?? defaultCategory
-})
+const activeIndex = ref(0)
+
+const categories =
+  ref<Category[]>([])
+
+const defaultCategory: Category = {
+  id: 0,
+  name: '',
+  slug: '',
+  link: '/',
+  subCategories: [],
+}
+
+const activeCategory =
+  computed<Category>(() => {
+    return (
+      categories.value?.[
+        activeIndex.value
+      ] ??
+      defaultCategory
+    )
+  })
+
+const loadCategories =
+  async () => {
+    try {
+      const response =
+        await apiClient.get<CategoryTreeResponse>(
+          '/category/tree',
+        )
+
+      const data =
+        response.data?.data
+
+      if (!Array.isArray(data)) {
+        categories.value = []
+        activeIndex.value = 0
+        return
+      }
+
+      categories.value = data
+
+      activeIndex.value = 0
+
+      console.log(
+        'CATEGORY TREE:',
+        categories.value,
+      )
+    } catch (error) {
+      console.error(
+        'Load categories error:',
+        error,
+      )
+
+      categories.value = []
+      activeIndex.value = 0
+    }
+  }
+
+onMounted(loadCategories)
 </script>
 
 <style scoped lang="scss">

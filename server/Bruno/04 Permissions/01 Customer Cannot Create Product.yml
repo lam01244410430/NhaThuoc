@@ -5,7 +5,7 @@ info:
 
 http:
   method: POST
-  url: "{{baseUrl}}/products"
+  url: "{{baseUrl}}/product"
   headers:
     - name: Authorization
       value: Bearer {{customerToken}}

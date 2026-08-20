@@ -1,7 +1,7 @@
 info:
   name: 05 Admin Pending Shops
   type: http
-  seq: 1
+  seq: 4
 
 http:
   method: GET

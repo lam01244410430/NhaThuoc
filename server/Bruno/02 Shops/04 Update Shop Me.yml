@@ -1,7 +1,7 @@
 info:
   name: 04 Update Shop Me
   type: http
-  seq: 1
+  seq: 3
 
 http:
   method: PUT
